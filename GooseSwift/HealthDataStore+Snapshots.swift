@@ -165,24 +165,37 @@ extension HealthDataStore {
     liveHeartRateUpdatedAt: Date?,
     stableDailyMetrics: Bool = false
   ) -> [HealthMetricSnapshot] {
-    var snapshots = Self.baseLandingSnapshots
-    if let index = snapshots.firstIndex(where: { $0.route == .sleep }) {
-      snapshots[index] = sleepSnapshot(base: snapshots[index])
-    }
-    if let index = snapshots.firstIndex(where: { $0.route == .recovery }) {
-      snapshots[index] = recoverySnapshot(base: snapshots[index])
-    }
-    if let index = snapshots.firstIndex(where: { $0.route == .strain }) {
-      snapshots[index] = strainSnapshot(base: snapshots[index])
-    }
-    if let index = snapshots.firstIndex(where: { $0.route == .stress }) {
-      snapshots[index] = stressSnapshot(base: snapshots[index], allowLiveFallbacks: !stableDailyMetrics)
-    }
-    if let index = snapshots.firstIndex(where: { $0.route == .cardioLoad }) {
-      snapshots[index] = cardioLoadSnapshot(base: snapshots[index])
-    }
-    if let index = snapshots.firstIndex(where: { $0.route == .energyBank }) {
-      snapshots[index] = energyBankSnapshot(base: snapshots[index], allowLiveFallbacks: !stableDailyMetrics)
+    var snapshots: [HealthMetricSnapshot]
+    // The dashboard calls this ~6x per render with stableDailyMetrics == true. The heavy
+    // per-route algorithm summaries are then pure functions of the packet reports, so
+    // memoize them against healthReportRevision and only re-run on a data change. The
+    // (cheap) live-HR override below is always applied fresh to a copy.
+    if stableDailyMetrics, cachedStableLandingSnapshotsRevision == healthReportRevision {
+      snapshots = cachedStableLandingSnapshots
+    } else {
+      snapshots = Self.baseLandingSnapshots
+      if let index = snapshots.firstIndex(where: { $0.route == .sleep }) {
+        snapshots[index] = sleepSnapshot(base: snapshots[index])
+      }
+      if let index = snapshots.firstIndex(where: { $0.route == .recovery }) {
+        snapshots[index] = recoverySnapshot(base: snapshots[index])
+      }
+      if let index = snapshots.firstIndex(where: { $0.route == .strain }) {
+        snapshots[index] = strainSnapshot(base: snapshots[index])
+      }
+      if let index = snapshots.firstIndex(where: { $0.route == .stress }) {
+        snapshots[index] = stressSnapshot(base: snapshots[index], allowLiveFallbacks: !stableDailyMetrics)
+      }
+      if let index = snapshots.firstIndex(where: { $0.route == .cardioLoad }) {
+        snapshots[index] = cardioLoadSnapshot(base: snapshots[index])
+      }
+      if let index = snapshots.firstIndex(where: { $0.route == .energyBank }) {
+        snapshots[index] = energyBankSnapshot(base: snapshots[index], allowLiveFallbacks: !stableDailyMetrics)
+      }
+      if stableDailyMetrics {
+        cachedStableLandingSnapshots = snapshots
+        cachedStableLandingSnapshotsRevision = healthReportRevision
+      }
     }
     if let liveHeartRateBPM,
        let index = snapshots.firstIndex(where: { $0.id == "health-monitor" }) {
@@ -231,6 +244,14 @@ extension HealthDataStore {
         )
       }
     }
+    // Dashboard fast path: the packet-backed snapshots (no live fallbacks) are a pure
+    // function of the packet reports, so memoize them against healthReportRevision. This
+    // turns the per-render O(rows) display-safety pass into a single recompute per data
+    // change, eliminating the main-thread freeze HomeDashboardView.body was causing.
+    if !allowLiveFallbacks,
+       cachedPacketBackedHealthMonitorSnapshotsRevision == healthReportRevision {
+      return cachedPacketBackedHealthMonitorSnapshots
+    }
     var snapshots = Self.baseHealthMonitorSnapshots.map {
       packetBackedHealthMonitorSnapshot(base: $0, allowLiveFallbacks: allowLiveFallbacks)
     }
@@ -250,6 +271,10 @@ extension HealthDataStore {
     }
     if let index = snapshots.firstIndex(where: { $0.id == "health-sleep" }) {
       snapshots[index] = sleepHealthMonitorSnapshot(base: snapshots[index])
+    }
+    if !allowLiveFallbacks {
+      cachedPacketBackedHealthMonitorSnapshots = snapshots
+      cachedPacketBackedHealthMonitorSnapshotsRevision = healthReportRevision
     }
     return snapshots
   }
@@ -692,8 +717,9 @@ extension HealthDataStore {
   }
 
   func dailyActivityMetrics() -> [[String: Any]] {
-    Self.array(packetInputReports["daily_activity"]?["metrics"])
-      .filter { Self.localHealthMetricRowIsDisplaySafe($0) }
+    displaySafeMetrics("daily_activity") {
+      Self.array(packetInputReports["daily_activity"]?["metrics"])
+    }
   }
 
   func dailyActivityMetrics(forDateKey dateKey: String) -> [[String: Any]] {
@@ -705,8 +731,9 @@ extension HealthDataStore {
   }
 
   func hourlyActivityMetrics() -> [[String: Any]] {
-    Self.array(packetInputReports["hourly_activity"]?["metrics"])
-      .filter { Self.localHealthMetricRowIsDisplaySafe($0) }
+    displaySafeMetrics("hourly_activity") {
+      Self.array(packetInputReports["hourly_activity"]?["metrics"])
+    }
   }
 
   func hourlyActivityMetrics(forDateKey dateKey: String) -> [[String: Any]] {

@@ -26,9 +26,36 @@ final class HealthDataStore: ObservableObject {
   let heartRateSeriesStore = HeartRateSeriesStore.shared
   var attemptedCatalogLoad = false
   var previewMissingData = false
-  var packetInputReports: [String: [String: Any]] = [:]
-  var packetScoreReports: [String: [String: Any]] = [:]
+  var packetInputReports: [String: [String: Any]] = [:] { didSet { healthReportRevision &+= 1 } }
+  var packetScoreReports: [String: [String: Any]] = [:] { didSet { healthReportRevision &+= 1 } }
   var referenceComparisonReports: [String: [String: Any]] = [:]
+  // Bumped whenever the packet input/score reports change. The packet-backed health
+  // monitor snapshots are derived from these reports with an O(rows) display-safety pass
+  // that the dashboard body invoked on every SwiftUI render; over a grown dataset that
+  // froze the main thread. Snapshots are now memoized against this revision so the heavy
+  // pass only runs when the underlying data actually changes, not per render.
+  private(set) var healthReportRevision = 0
+  var cachedPacketBackedHealthMonitorSnapshots: [HealthMetricSnapshot] = []
+  var cachedPacketBackedHealthMonitorSnapshotsRevision = -1
+  // Memoized display-safe-filtered metric arrays keyed by report name. The display-safe
+  // pass (localHealthMetricRowIsDisplaySafe) is O(rows) and was re-run by many dashboard
+  // body properties on every render; cache the filtered result per healthReportRevision.
+  var displaySafeMetricsCache: [String: (revision: Int, rows: [[String: Any]])] = [:]
+  // Memoized landing snapshots for the dashboard's stable path (stableDailyMetrics ==
+  // true). landingSnapshots runs sleep/recovery/strain/stress/cardio/energy algorithm
+  // summaries (each a Dictionary(grouping:) over thousands of HR samples) and is called
+  // ~6x per HomeDashboardView render; without this it froze the main thread.
+  var cachedStableLandingSnapshots: [HealthMetricSnapshot] = []
+  var cachedStableLandingSnapshotsRevision = -1
+
+  func displaySafeMetrics(_ key: String, _ build: () -> [[String: Any]]) -> [[String: Any]] {
+    if let cached = displaySafeMetricsCache[key], cached.revision == healthReportRevision {
+      return cached.rows
+    }
+    let rows = build().filter { Self.localHealthMetricRowIsDisplaySafe($0) }
+    displaySafeMetricsCache[key] = (revision: healthReportRevision, rows: rows)
+    return rows
+  }
   var packetInputRefreshWorkItem: DispatchWorkItem?
   var packetInputRunID: UUID?
   var packetInputIsRunning = false

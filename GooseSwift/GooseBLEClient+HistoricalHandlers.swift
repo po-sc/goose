@@ -515,7 +515,20 @@ extension GooseBLEClient {
           | (UInt32(payload[11]) << 8)
           | (UInt32(payload[12]) << 16)
           | (UInt32(payload[13]) << 24)
-        gen4HistoricalPageSeq = lastSynced &+ 1
+        var startSeq = lastSynced &+ 1
+        // DIAGNOSTIC (env-gated, default off): re-fetch already-synced data-bearing
+        // pages to capture the historical-transfer container format. The strap re-sends
+        // those pages; the DB dedupes via INSERT OR IGNORE so this is non-destructive.
+        if let refetchStr = ProcessInfo.processInfo.environment["GOOSE_HISTORY_REFETCH_PAGES"],
+           let refetch = UInt32(refetchStr), lastSynced > refetch {
+          startSeq = lastSynced &- refetch
+          record(
+            source: "ble.sync",
+            title: "historical_sync.gen4.refetch",
+            body: "refetch=\(refetch) start=\(startSeq) last_synced=\(lastSynced)"
+          )
+        }
+        gen4HistoricalPageSeq = startSeq
         record(
           source: "ble.sync",
           title: "historical_sync.gen4.range",

@@ -101,6 +101,17 @@ extension GooseAppModel {
   }
 
   func schedulePassiveActivityCapture(reason: String) {
+    // Passive activity auto-capture starts a full-rate realtime health-packet capture on
+    // every "ready". Its notification ingest is dispatched to the MAIN thread (see
+    // handleNotification: captureImportActive -> DispatchQueue.main.async), so the
+    // high-rate motion/K11/HR stream floods the main thread and produces repeating
+    // ~1.5s hangs -> the UI becomes unclickable ("app froze"). Historical sync + the
+    // health metrics (HRV/recovery/sleep) do not need this capture, so it is disabled by
+    // default. Opt back in with GOOSE_ENABLE_PASSIVE_ACTIVITY=1 once the ingest path is
+    // moved off the main thread.
+    guard ProcessInfo.processInfo.environment["GOOSE_ENABLE_PASSIVE_ACTIVITY"] == "1" else {
+      return
+    }
     guard !autoStartHealthPacketCaptureOnReady,
           !autoStartTemperaturePacketCaptureOnReady,
           !autoStartPhysiologyPacketCaptureOnReady,
