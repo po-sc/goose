@@ -5,8 +5,9 @@ import UIKit
 
 extension HealthDataStore {
   func dailyRecoveryMetrics() -> [[String: Any]] {
-    Self.array(packetInputReports["daily_recovery"]?["metrics"])
-      .filter { Self.localHealthMetricRowIsDisplaySafe($0) }
+    displaySafeMetrics("daily_recovery") {
+      Self.array(packetInputReports["daily_recovery"]?["metrics"])
+    }
   }
 
   func dailyRecoveryMetricsWithRestingHR() -> [[String: Any]] {

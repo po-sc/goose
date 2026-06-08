@@ -231,6 +231,14 @@ extension HealthDataStore {
         )
       }
     }
+    // Dashboard fast path: the packet-backed snapshots (no live fallbacks) are a pure
+    // function of the packet reports, so memoize them against healthReportRevision. This
+    // turns the per-render O(rows) display-safety pass into a single recompute per data
+    // change, eliminating the main-thread freeze HomeDashboardView.body was causing.
+    if !allowLiveFallbacks,
+       cachedPacketBackedHealthMonitorSnapshotsRevision == healthReportRevision {
+      return cachedPacketBackedHealthMonitorSnapshots
+    }
     var snapshots = Self.baseHealthMonitorSnapshots.map {
       packetBackedHealthMonitorSnapshot(base: $0, allowLiveFallbacks: allowLiveFallbacks)
     }
@@ -250,6 +258,10 @@ extension HealthDataStore {
     }
     if let index = snapshots.firstIndex(where: { $0.id == "health-sleep" }) {
       snapshots[index] = sleepHealthMonitorSnapshot(base: snapshots[index])
+    }
+    if !allowLiveFallbacks {
+      cachedPacketBackedHealthMonitorSnapshots = snapshots
+      cachedPacketBackedHealthMonitorSnapshotsRevision = healthReportRevision
     }
     return snapshots
   }
@@ -692,8 +704,9 @@ extension HealthDataStore {
   }
 
   func dailyActivityMetrics() -> [[String: Any]] {
-    Self.array(packetInputReports["daily_activity"]?["metrics"])
-      .filter { Self.localHealthMetricRowIsDisplaySafe($0) }
+    displaySafeMetrics("daily_activity") {
+      Self.array(packetInputReports["daily_activity"]?["metrics"])
+    }
   }
 
   func dailyActivityMetrics(forDateKey dateKey: String) -> [[String: Any]] {
@@ -705,8 +718,9 @@ extension HealthDataStore {
   }
 
   func hourlyActivityMetrics() -> [[String: Any]] {
-    Self.array(packetInputReports["hourly_activity"]?["metrics"])
-      .filter { Self.localHealthMetricRowIsDisplaySafe($0) }
+    displaySafeMetrics("hourly_activity") {
+      Self.array(packetInputReports["hourly_activity"]?["metrics"])
+    }
   }
 
   func hourlyActivityMetrics(forDateKey dateKey: String) -> [[String: Any]] {

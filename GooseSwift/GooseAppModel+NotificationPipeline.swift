@@ -130,11 +130,12 @@ extension GooseAppModel {
 
     let event = result.event
     if result.droppedBytes > 0 {
+      let rawHexPrefix = event.value.prefix(60).map { String(format: "%02x", $0) }.joined()
       ble.record(
         level: result.droppedBytes >= 32 ? .warn : .debug,
         source: "rust",
         title: "notification.frame.reassembly.dropped",
-        body: "\(event.characteristicUUID) dropped=\(result.droppedBytes) buffered=\(result.bufferedBytes)"
+        body: "\(event.characteristicUUID) dropped=\(result.droppedBytes) buffered=\(result.bufferedBytes) total=\(event.value.count) raw=\(rawHexPrefix)"
       )
       if result.bufferedBytes == 0 {
         return

@@ -232,7 +232,15 @@ extension HealthDataStore {
   }
 
   static func localHealthMetricJSONStringContainsForbiddenSourceMarker(_ text: String) -> Bool {
-    guard let data = text.data(using: .utf8),
+    // Only attempt the (expensive) JSON parse when the string actually looks like a JSON
+    // object/array. This check runs per-string, per-field, per-row, per-metric inside the
+    // dashboard render path; blindly JSON-parsing every plain string (dates, source
+    // names, numbers) over a grown dataset cost ~1.5s on the main thread and froze the UI.
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let first = trimmed.first, first == "{" || first == "[" else {
+      return false
+    }
+    guard let data = trimmed.data(using: .utf8),
           let value = try? JSONSerialization.jsonObject(with: data) else {
       return false
     }

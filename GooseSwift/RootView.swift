@@ -179,9 +179,17 @@ private struct SyncToastIcon: View {
   let tint: Color
   let isSyncing: Bool
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
-    if isSyncing && !reduceMotion {
+    // The 60fps TimelineView keeps the whole SwiftUI render pipeline (UpdateCycle ->
+    // AttributeGraph -> CoreAnimation) spinning every frame. While the app is
+    // foregrounded that is cheap and gives the spinner its motion, but when the app is
+    // backgrounded during a multi-hour history sync the timeline keeps requesting frames
+    // with nothing on screen, pinning the process at ~96% CPU and getting it killed by
+    // iOS's non-frontmost CPU budget (cpu_resource_fatal). Only animate while frontmost;
+    // fall back to the static glyph otherwise so the sync keeps running off-screen.
+    if isSyncing && !reduceMotion && scenePhase == .active {
       TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
         symbol(rotationDegrees: rotationDegrees(for: context.date))
       }

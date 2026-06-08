@@ -408,7 +408,24 @@ extension GooseBLEClient {
       return true
     }
     guard historicalTransferRequestAttemptCount < historicalTransferMaxRequestAttempts else {
-      let metadataSummary = historyStartReceived || historyEndReceived || historyCompleteReceived
+      let metadataReceived = historyStartReceived || historyEndReceived || historyCompleteReceived
+      // Gen4: the Swift sync path cannot count fragmented K24 bodies (see the retry
+      // comment above), and the strap streams page-by-page HistoryStart/End without ever
+      // emitting a final HistoryComplete once the phone has caught up to the newest
+      // recorded page. Hitting the attempt budget with metadata flowing but no countable
+      // bodies therefore means "reached the end of available history", NOT a failure.
+      // Surfacing it as a failure is exactly what users saw as "sync fell". Complete
+      // cleanly instead; the Rust capture pipeline persists whatever bodies arrived.
+      if activeDeviceGeneration == .gen4 && metadataReceived {
+        record(
+          source: "ble.sync",
+          title: "historical_sync.gen4.caught_up",
+          body: "metadata-only after \(historicalTransferRequestAttemptCount) attempts; treating as caught up to newest page"
+        )
+        completeHistoricalSync(reason: "gen4_caught_up_metadata_only")
+        return true
+      }
+      let metadataSummary = metadataReceived
         ? "transfer metadata was received but no historical packet bodies arrived"
         : "a historical transfer never started"
       failHistoricalSync(
