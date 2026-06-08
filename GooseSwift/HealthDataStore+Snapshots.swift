@@ -165,24 +165,37 @@ extension HealthDataStore {
     liveHeartRateUpdatedAt: Date?,
     stableDailyMetrics: Bool = false
   ) -> [HealthMetricSnapshot] {
-    var snapshots = Self.baseLandingSnapshots
-    if let index = snapshots.firstIndex(where: { $0.route == .sleep }) {
-      snapshots[index] = sleepSnapshot(base: snapshots[index])
-    }
-    if let index = snapshots.firstIndex(where: { $0.route == .recovery }) {
-      snapshots[index] = recoverySnapshot(base: snapshots[index])
-    }
-    if let index = snapshots.firstIndex(where: { $0.route == .strain }) {
-      snapshots[index] = strainSnapshot(base: snapshots[index])
-    }
-    if let index = snapshots.firstIndex(where: { $0.route == .stress }) {
-      snapshots[index] = stressSnapshot(base: snapshots[index], allowLiveFallbacks: !stableDailyMetrics)
-    }
-    if let index = snapshots.firstIndex(where: { $0.route == .cardioLoad }) {
-      snapshots[index] = cardioLoadSnapshot(base: snapshots[index])
-    }
-    if let index = snapshots.firstIndex(where: { $0.route == .energyBank }) {
-      snapshots[index] = energyBankSnapshot(base: snapshots[index], allowLiveFallbacks: !stableDailyMetrics)
+    var snapshots: [HealthMetricSnapshot]
+    // The dashboard calls this ~6x per render with stableDailyMetrics == true. The heavy
+    // per-route algorithm summaries are then pure functions of the packet reports, so
+    // memoize them against healthReportRevision and only re-run on a data change. The
+    // (cheap) live-HR override below is always applied fresh to a copy.
+    if stableDailyMetrics, cachedStableLandingSnapshotsRevision == healthReportRevision {
+      snapshots = cachedStableLandingSnapshots
+    } else {
+      snapshots = Self.baseLandingSnapshots
+      if let index = snapshots.firstIndex(where: { $0.route == .sleep }) {
+        snapshots[index] = sleepSnapshot(base: snapshots[index])
+      }
+      if let index = snapshots.firstIndex(where: { $0.route == .recovery }) {
+        snapshots[index] = recoverySnapshot(base: snapshots[index])
+      }
+      if let index = snapshots.firstIndex(where: { $0.route == .strain }) {
+        snapshots[index] = strainSnapshot(base: snapshots[index])
+      }
+      if let index = snapshots.firstIndex(where: { $0.route == .stress }) {
+        snapshots[index] = stressSnapshot(base: snapshots[index], allowLiveFallbacks: !stableDailyMetrics)
+      }
+      if let index = snapshots.firstIndex(where: { $0.route == .cardioLoad }) {
+        snapshots[index] = cardioLoadSnapshot(base: snapshots[index])
+      }
+      if let index = snapshots.firstIndex(where: { $0.route == .energyBank }) {
+        snapshots[index] = energyBankSnapshot(base: snapshots[index], allowLiveFallbacks: !stableDailyMetrics)
+      }
+      if stableDailyMetrics {
+        cachedStableLandingSnapshots = snapshots
+        cachedStableLandingSnapshotsRevision = healthReportRevision
+      }
     }
     if let liveHeartRateBPM,
        let index = snapshots.firstIndex(where: { $0.id == "health-monitor" }) {

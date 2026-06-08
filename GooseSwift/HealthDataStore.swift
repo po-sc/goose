@@ -41,6 +41,12 @@ final class HealthDataStore: ObservableObject {
   // pass (localHealthMetricRowIsDisplaySafe) is O(rows) and was re-run by many dashboard
   // body properties on every render; cache the filtered result per healthReportRevision.
   var displaySafeMetricsCache: [String: (revision: Int, rows: [[String: Any]])] = [:]
+  // Memoized landing snapshots for the dashboard's stable path (stableDailyMetrics ==
+  // true). landingSnapshots runs sleep/recovery/strain/stress/cardio/energy algorithm
+  // summaries (each a Dictionary(grouping:) over thousands of HR samples) and is called
+  // ~6x per HomeDashboardView render; without this it froze the main thread.
+  var cachedStableLandingSnapshots: [HealthMetricSnapshot] = []
+  var cachedStableLandingSnapshotsRevision = -1
 
   func displaySafeMetrics(_ key: String, _ build: () -> [[String: Any]]) -> [[String: Any]] {
     if let cached = displaySafeMetricsCache[key], cached.revision == healthReportRevision {
